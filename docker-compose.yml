@@ -1,0 +1,15 @@
+﻿version: "3.9"
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: prhub
+      POSTGRES_PASSWORD: prhub
+      POSTGRES_DB: prhub
+    ports:
+      - "5432:5432"
+    volumes:
+      - prhub_pgdata:/var/lib/postgresql/data
+volumes:
+  prhub_pgdata:

@@ -1,0 +1,354 @@
+﻿generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role { KOVI SUPPLIER ADMIN }
+
+enum DispatchStatus {
+  QUOTING
+  APPROVED
+  REJECTED
+  IN_TRANSIT
+  ON_SITE
+  CLOSE_REQUESTED
+  CLOSED
+}
+
+enum QuoteStatus {
+  PENDING
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum DispatchReason {
+  ROUBO
+  FURTO
+  DESCONEXAO_RASTREADOR
+  RASTREADOR_SEM_SINAL
+  APROPRIACAO_INDEBITA
+  AVERIGUACAO
+  RODANDO_BLOQUEADO
+  OUTROS
+}
+
+enum ChatAuthorType { USER SYSTEM FIELD }
+enum AttachmentOrigin { CHAT FIELD COST_EVIDENCE }
+enum FieldEventType { START_TRIP ARRIVE_ON_SITE REQUEST_CLOSE CLOSE }
+enum AuditActorType { USER FIELD_SESSION SYSTEM }
+enum CostValidationFlag { OK NEEDS_REVIEW MISSING_EVIDENCE GPS_MISMATCH TIME_MISMATCH }
+
+model User {
+  id                String   @id @default(cuid())
+  role              Role
+  name              String
+  email             String   @unique
+  isActive          Boolean  @default(true)
+
+  supplierCompanyId String?
+  supplierCompany   SupplierCompany? @relation(fields: [supplierCompanyId], references: [id])
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  createdDispatches  Dispatch[] @relation("DispatchCreatedBy")
+  approvedDispatches Dispatch[] @relation("DispatchApprovedBy")
+  rejectedDispatches Dispatch[] @relation("DispatchRejectedBy")
+  closedDispatches   Dispatch[] @relation("DispatchClosedBy")
+
+  chatMessages      ChatMessage[]
+  auditEvents       AuditEvent[]
+
+  @@index([role])
+  @@index([supplierCompanyId])
+}
+
+model SupplierCompany {
+  id               String  @id @default(cuid())
+  legalName        String
+  cnpj             String  @unique
+  address          String
+  responsibleName  String
+  phone            String
+  includedKm       Int     @default(0)
+  includedMinutes  Int     @default(0)
+  isActive         Boolean @default(true)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  users            User[]
+  quotes           Quote[]
+  approvedDispatches Dispatch[]
+
+  @@index([isActive])
+}
+
+model Vehicle {
+  id        String   @id @default(cuid())
+  plate     String   @unique
+  model     String
+  color     String?
+  year      Int?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Dispatch {
+  id                String         @id @default(cuid())
+  status            DispatchStatus @default(QUOTING)
+
+  vehicleId         String?
+  vehicle           Vehicle? @relation(fields: [vehicleId], references: [id])
+
+  plate             String
+  vehicleModel      String?
+  vehicleColor      String?
+  vehicleYear       Int?
+
+  address           String
+  latitude          Decimal? @db.Decimal(10, 7)
+  longitude         Decimal? @db.Decimal(10, 7)
+
+  geocodeProvider   String?
+  geocodeRaw        Json?
+
+  driverName        String?
+  reason            DispatchReason
+  reasonDetails     String?
+
+  approvedSupplierCompanyId String?
+  approvedSupplierCompany   SupplierCompany? @relation(fields: [approvedSupplierCompanyId], references: [id])
+
+  approvedQuoteId   String?
+  approvedQuote     Quote? @relation("DispatchApprovedQuote", fields: [approvedQuoteId], references: [id])
+
+  createdById       String
+  createdBy         User @relation("DispatchCreatedBy", fields: [createdById], references: [id])
+
+  approvedById      String?
+  approvedBy        User? @relation("DispatchApprovedBy", fields: [approvedById], references: [id])
+  approvedAt        DateTime?
+
+  rejectedById      String?
+  rejectedBy        User? @relation("DispatchRejectedBy", fields: [rejectedById], references: [id])
+  rejectedAt        DateTime?
+  rejectReason      String?
+
+  closedById        String?
+  closedBy          User? @relation("DispatchClosedBy", fields: [closedById], references: [id])
+  closedAt          DateTime?
+
+  fieldStartedAt    DateTime?
+  fieldArrivedAt    DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  quotes            Quote[]
+  chatRoom          ChatRoom?
+  fieldSessions     FieldSession[]
+  cost              CostBreakdown?
+  attachments       Attachment[]
+  auditEvents       AuditEvent[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([approvedSupplierCompanyId, status])
+  @@index([plate])
+}
+
+model Quote {
+  id                String      @id @default(cuid())
+  dispatchId        String
+  dispatch          Dispatch    @relation(fields: [dispatchId], references: [id])
+
+  supplierCompanyId String
+  supplierCompany   SupplierCompany @relation(fields: [supplierCompanyId], references: [id])
+
+  status            QuoteStatus @default(PENDING)
+
+  etaMinutes        Int?
+  supplierNote      String?
+  submittedAt       DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  approvedForDispatch Dispatch? @relation("DispatchApprovedQuote")
+
+  @@unique([dispatchId, supplierCompanyId])
+  @@index([supplierCompanyId, status])
+  @@index([dispatchId, status])
+}
+
+model ChatRoom {
+  id         String   @id @default(cuid())
+  dispatchId String   @unique
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id])
+  createdAt  DateTime @default(now())
+  messages   ChatMessage[]
+}
+
+model ChatMessage {
+  id              String       @id @default(cuid())
+  chatRoomId      String
+  chatRoom        ChatRoom     @relation(fields: [chatRoomId], references: [id])
+
+  authorType      ChatAuthorType
+  authorUserId    String?
+  authorUser      User?        @relation(fields: [authorUserId], references: [id])
+
+  fieldSessionId  String?
+  fieldSession    FieldSession? @relation(fields: [fieldSessionId], references: [id])
+
+  text            String?
+  systemType      String?
+
+  createdAt       DateTime @default(now())
+  attachments     Attachment[]
+
+  @@index([chatRoomId, createdAt])
+  @@index([authorUserId])
+  @@index([fieldSessionId])
+}
+
+model Attachment {
+  id            String           @id @default(cuid())
+  dispatchId    String?
+  dispatch      Dispatch?        @relation(fields: [dispatchId], references: [id])
+
+  chatMessageId String?
+  chatMessage   ChatMessage?     @relation(fields: [chatMessageId], references: [id])
+
+  origin        AttachmentOrigin
+  fileName      String
+  mimeType      String
+  sizeBytes     Int
+  storageKey    String
+  publicUrl     String?
+  meta          Json?
+
+  createdAt     DateTime @default(now())
+
+  @@index([dispatchId, createdAt])
+  @@index([chatMessageId])
+  @@index([origin])
+}
+
+model FieldSession {
+  id               String   @id @default(cuid())
+  dispatchId       String
+  dispatch         Dispatch @relation(fields: [dispatchId], references: [id])
+
+  tokenHash        String   @unique
+  expiresAt        DateTime?
+
+  allowClose       Boolean  @default(false)
+
+  startedAt        DateTime?
+  arrivedAt        DateTime?
+  closeRequestedAt DateTime?
+  closedAt         DateTime?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  gpsPoints        GPSPoint[]
+  fieldEvents      FieldEvent[]
+  chatMessages     ChatMessage[]
+
+  @@index([dispatchId, createdAt])
+}
+
+model GPSPoint {
+  id             String   @id @default(cuid())
+  fieldSessionId String
+  fieldSession   FieldSession @relation(fields: [fieldSessionId], references: [id])
+
+  latitude       Decimal  @db.Decimal(10, 7)
+  longitude      Decimal  @db.Decimal(10, 7)
+  accuracyM      Int?
+  speedMps       Float?
+  recordedAt     DateTime
+
+  createdAt      DateTime @default(now())
+
+  @@index([fieldSessionId, recordedAt])
+}
+
+model FieldEvent {
+  id             String        @id @default(cuid())
+  fieldSessionId String
+  fieldSession   FieldSession  @relation(fields: [fieldSessionId], references: [id])
+
+  type           FieldEventType
+  occurredAt     DateTime @default(now())
+  meta           Json?
+
+  @@index([fieldSessionId, occurredAt])
+  @@index([type])
+}
+
+model CostBreakdown {
+  id                String   @id @default(cuid())
+  dispatchId         String   @unique
+  dispatch           Dispatch @relation(fields: [dispatchId], references: [id])
+
+  currency           String   @default("BRL")
+
+  exitValueCents     Int      @default(0)
+  extraKm            Int      @default(0)
+  extraHourMinutes   Int      @default(0)
+
+  reimbursements     Json?
+
+  measuredKm         Int?
+  measuredMinutes    Int?
+
+  validationFlag     CostValidationFlag @default(OK)
+  validationNotes    String?
+
+  submittedByUserId  String?
+  submittedByUser    User? @relation(fields: [submittedByUserId], references: [id])
+
+  submittedAt        DateTime?
+  reviewedByUserId   String?
+  reviewedByUser     User? @relation(fields: [reviewedByUserId], references: [id])
+  reviewedAt         DateTime?
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([submittedAt])
+  @@index([validationFlag])
+}
+
+model AuditEvent {
+  id                  String         @id @default(cuid())
+  dispatchId           String
+  dispatch             Dispatch       @relation(fields: [dispatchId], references: [id])
+
+  actorType            AuditActorType
+  actorUserId          String?
+  actorUser            User?          @relation(fields: [actorUserId], references: [id])
+  actorFieldSessionId  String?
+  actorFieldSession    FieldSession?  @relation(fields: [actorFieldSessionId], references: [id])
+
+  eventType            String
+  occurredAt           DateTime       @default(now())
+  payload              Json?
+
+  @@index([dispatchId, occurredAt])
+  @@index([eventType])
+  @@index([actorUserId])
+  @@index([actorFieldSessionId])
+}

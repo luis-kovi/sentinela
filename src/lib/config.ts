@@ -1,0 +1,2 @@
+﻿export const QUOTE_EXPIRES_MINUTES = 60;
+export const FIELD_SESSION_EXPIRES_MINUTES = 60;
