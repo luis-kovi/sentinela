@@ -41,6 +41,19 @@ function formatTime(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function buildAttachmentTitle(att: ChatMessage["attachments"][number]) {
+  const parts: string[] = [];
+  const mime = att.meta?.mimeType ?? att.mimeType;
+  if (mime) parts.push(mime);
+  if (att.meta?.width && att.meta?.height) {
+    parts.push(`${att.meta.width}x${att.meta.height}`);
+  }
+  if (typeof att.sizeBytes === "number") {
+    parts.push(formatBytes(att.sizeBytes));
+  }
+  return parts.join(" • ");
+}
+
 async function getImageDimensions(file: File): Promise<{ width: number; height: number } | null> {
   try {
     const url = URL.createObjectURL(file);
@@ -246,6 +259,7 @@ export default function DispatchChatPage({ params, searchParams }: DispatchPageP
                           <img
                             src={att.publicUrl}
                             alt={att.fileName}
+                            title={buildAttachmentTitle(att)}
                             style={{
                               maxWidth: 180,
                               maxHeight: 120,
@@ -258,11 +272,11 @@ export default function DispatchChatPage({ params, searchParams }: DispatchPageP
                         </div>
                       )}
                       {att.publicUrl ? (
-                        <a href={att.publicUrl} target="_blank" rel="noreferrer">
+                        <a href={att.publicUrl} target="_blank" rel="noreferrer" title={buildAttachmentTitle(att)}>
                           {att.fileName}
                         </a>
                       ) : (
-                        att.fileName
+                        <span title={buildAttachmentTitle(att)}>{att.fileName}</span>
                       )}
                       {(att.meta?.mimeType || att.mimeType) && (
                         <span style={{ marginLeft: 8, fontSize: 12, color: "#666" }}>

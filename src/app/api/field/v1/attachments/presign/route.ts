@@ -11,7 +11,14 @@ const presignSchema = z.object({
   mimeType: z.string().min(1),
   sizeBytes: z.number().int().min(1),
   dispatchId: z.string().min(1),
-  meta: z.record(z.unknown()).optional()
+  meta: z
+    .object({
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+      mimeType: z.string().optional()
+    })
+    .passthrough()
+    .optional()
 });
 
 export async function POST(request: Request) {
@@ -22,7 +29,7 @@ export async function POST(request: Request) {
 
     const fieldSession = await requireFieldSessionByToken(token, input.dispatchId);
 
-    validateUploadByRole(input.fileName, input.mimeType, input.sizeBytes, "FIELD");
+    validateUploadByRole(input.fileName, input.mimeType, input.sizeBytes, "FIELD", "FIELD", input.meta);
 
     const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const storageKey = `dispatch/${input.dispatchId}/field/${Date.now()}-${safeFileName}`;

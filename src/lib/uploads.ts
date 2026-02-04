@@ -14,6 +14,8 @@ const DEFAULT_ALLOWED_EXTENSIONS = [
 ];
 const DEFAULT_SUPPLIER_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "pdf"];
 const DEFAULT_FIELD_EXTENSIONS = DEFAULT_SUPPLIER_EXTENSIONS;
+const DEFAULT_CHAT_EXTENSIONS = DEFAULT_ALLOWED_EXTENSIONS;
+const DEFAULT_COST_EVIDENCE_EXTENSIONS = DEFAULT_SUPPLIER_EXTENSIONS;
 
 const EXTENSION_MIME_HINT: Record<string, string> = {
   jpg: "image/",
@@ -34,23 +36,26 @@ function getExtension(fileName: string): string | null {
 }
 
 export function validateUpload(fileName: string, mimeType: string, sizeBytes: number) {
-  validateUploadByPolicy(fileName, mimeType, sizeBytes, getUploadPolicy("KOVI"));
+  validateUploadByPolicy(fileName, mimeType, sizeBytes, getUploadPolicy("KOVI", "CHAT"));
 }
 
 export function validateUploadByRole(
   fileName: string,
   mimeType: string,
   sizeBytes: number,
-  role: "KOVI" | "ADMIN" | "SUPPLIER" | "FIELD"
+  role: "KOVI" | "ADMIN" | "SUPPLIER" | "FIELD",
+  origin: "CHAT" | "COST_EVIDENCE" | "FIELD",
+  meta?: { width?: number; height?: number }
 ) {
-  validateUploadByPolicy(fileName, mimeType, sizeBytes, getUploadPolicy(role));
+  validateUploadByPolicy(fileName, mimeType, sizeBytes, getUploadPolicy(role, origin), meta);
 }
 
 function validateUploadByPolicy(
   fileName: string,
   mimeType: string,
   sizeBytes: number,
-  policy: { maxBytes: number; allowedExtensions: Set<string> }
+  policy: { maxBytes: number; allowedExtensions: Set<string>; maxImageWidth?: number; maxImageHeight?: number },
+  meta?: { width?: number; height?: number }
 ) {
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
     throw new ApiError(400, "Invalid file size");
@@ -68,6 +73,8 @@ function validateUploadByPolicy(
   const normalizedMime = (mimeType || "").toLowerCase();
   const expected = EXTENSION_MIME_HINT[extension];
 
+  const isImage = expected?.startsWith("image/") || normalizedMime.startsWith("image/");
+
   if (normalizedMime && normalizedMime !== "application/octet-stream") {
     if (expected.endsWith("/")) {
       if (!normalizedMime.startsWith(expected)) {
@@ -77,10 +84,19 @@ function validateUploadByPolicy(
       throw new ApiError(400, "Mime type does not match file extension");
     }
   }
+
+  if (isImage) {
+    if (policy.maxImageWidth && meta?.width && meta.width > policy.maxImageWidth) {
+      throw new ApiError(400, "Image width exceeds limit");
+    }
+    if (policy.maxImageHeight && meta?.height && meta.height > policy.maxImageHeight) {
+      throw new ApiError(400, "Image height exceeds limit");
+    }
+  }
 }
 
 export function getMaxUploadBytes() {
-  return getUploadPolicy("KOVI").maxBytes;
+  return getUploadPolicy("KOVI", "CHAT").maxBytes;
 }
 
 function parseAllowedExtensions(value: string | undefined, fallback: string[]): Set<string> {
@@ -101,19 +117,39 @@ function parseMaxBytes(value: string | undefined, fallback: number): number {
   return Math.floor(parsed);
 }
 
-export function getUploadPolicy(role: "KOVI" | "ADMIN" | "SUPPLIER" | "FIELD") {
+export function getUploadPolicy(
+  role: "KOVI" | "ADMIN" | "SUPPLIER" | "FIELD",
+  origin: "CHAT" | "COST_EVIDENCE" | "FIELD"
+) {
   const maxBytes = parseMaxBytes(process.env.UPLOAD_MAX_BYTES, DEFAULT_MAX_UPLOAD_BYTES);
   const allowedDefault = parseAllowedExtensions(process.env.UPLOAD_ALLOWED_EXTENSIONS, DEFAULT_ALLOWED_EXTENSIONS);
   const allowedSupplier = parseAllowedExtensions(process.env.UPLOAD_SUPPLIER_EXTENSIONS, DEFAULT_SUPPLIER_EXTENSIONS);
   const allowedField = parseAllowedExtensions(process.env.UPLOAD_FIELD_EXTENSIONS, DEFAULT_FIELD_EXTENSIONS);
+  const allowedChat = parseAllowedExtensions(process.env.UPLOAD_CHAT_EXTENSIONS, DEFAULT_CHAT_EXTENSIONS);
+  const allowedCost = parseAllowedExtensions(
+    process.env.UPLOAD_COST_EVIDENCE_EXTENSIONS,
+    DEFAULT_COST_EVIDENCE_EXTENSIONS
+  );
+  const maxImageWidth = parseMaxBytes(process.env.UPLOAD_MAX_IMAGE_WIDTH, 0) || undefined;
+  const maxImageHeight = parseMaxBytes(process.env.UPLOAD_MAX_IMAGE_HEIGHT, 0) || undefined;
 
+  let roleAllowed = allowedDefault;
   if (role === "SUPPLIER") {
-    return { maxBytes, allowedExtensions: allowedSupplier };
+    roleAllowed = allowedSupplier;
+  } else if (role === "FIELD") {
+    roleAllowed = allowedField;
   }
 
-  if (role === "FIELD") {
-    return { maxBytes, allowedExtensions: allowedField };
+  let originAllowed = allowedChat;
+  if (origin === "COST_EVIDENCE") {
+    originAllowed = allowedCost;
+  } else if (origin === "FIELD") {
+    originAllowed = allowedField;
   }
 
-  return { maxBytes, allowedExtensions: allowedDefault };
+  const allowedExtensions = new Set(
+    [...roleAllowed].filter((ext) => originAllowed.has(ext))
+  );
+
+  return { maxBytes, allowedExtensions, maxImageWidth, maxImageHeight };
 }

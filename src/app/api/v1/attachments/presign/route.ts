@@ -15,7 +15,14 @@ const presignSchema = z.object({
   sizeBytes: z.number().int().min(1),
   origin: z.enum(["CHAT", "COST_EVIDENCE"]),
   dispatchId: z.string().min(1),
-  meta: z.record(z.unknown()).optional()
+  meta: z
+    .object({
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+      mimeType: z.string().optional()
+    })
+    .passthrough()
+    .optional()
 });
 
 function sanitizeFileName(fileName: string): string {
@@ -56,7 +63,7 @@ export async function POST(request: Request) {
     const input = presignSchema.parse(body);
 
     await requireDispatchAccess(user, input.dispatchId);
-    validateUploadByRole(input.fileName, input.mimeType, input.sizeBytes, user.role);
+    validateUploadByRole(input.fileName, input.mimeType, input.sizeBytes, user.role, input.origin, input.meta);
 
     const storageKey = createStorageKey(input.dispatchId, input.origin, input.fileName);
     const upload = await createUploadUrl({ key: storageKey, contentType: input.mimeType });
